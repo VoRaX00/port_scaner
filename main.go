@@ -3,27 +3,52 @@ package main
 import (
 	"fmt"
 	"net"
-	"sync"
+	"sort"
 )
 
-func isPortOpened(port int, wg *sync.WaitGroup) {
-	defer wg.Done()
-	addr := fmt.Sprintf("scanme.nmap.org:%d", port)
-	conn, err := net.Dial("tcp", addr)
+func worker(ports, results chan int) {
+	for port := range ports {
+		addr := fmt.Sprintf("scanme.nmap.org:%d", port)
+		conn, err := net.Dial("tcp", addr)
 
-	if err != nil {
-		return
+		if err != nil {
+			results <- 0
+			continue
+		}
+
+		conn.Close()
+		results <- port
 	}
-
-	conn.Close()
-	fmt.Printf("Port %d open\n", port)
 }
 
 func main() {
-	var wg sync.WaitGroup
-	for port := 1; port < 1024; port++ {
-		wg.Add(1)
-		go isPortOpened(port, &wg)
+	countPorts := 65536
+	ports := make(chan int, 100)
+	results := make(chan int)
+	var openports []int
+	for i := 0; i < cap(ports); i++ {
+		go worker(ports, results)
 	}
-	wg.Wait()
+
+	go func() {
+		for i := 1; i <= countPorts; i++ {
+			ports <- i
+		}
+	}()
+
+	for i := 0; i < countPorts; i++ {
+		port := <-results
+		if port != 0 {
+			openports = append(openports, port)
+		}
+	}
+
+	close(ports)
+	close(results)
+
+	sort.Ints(openports)
+
+	for _, port := range openports {
+		fmt.Printf("Port %d open\n", port)
+	}
 }
